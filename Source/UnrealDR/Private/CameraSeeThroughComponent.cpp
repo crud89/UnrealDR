@@ -161,6 +161,7 @@ void UCameraSeeThroughComponent::OnRegister()
 				// Create resources.
 				if (m_camera)
 				{
+					// TODO: Use intristics to compute FoV
 					frustum->FrustumColor = eye == vr::Eye_Left ? FColor::Blue : FColor::Green;
 					frustum->FrustumAngle = 90.0f;
 					frustum->FrustumAspectRatio = 16.f / 9.f;
