@@ -8,7 +8,7 @@ UCameraSeeThroughComponent::UCameraSeeThroughComponent()
 	PrimaryComponentTick.SetTickFunctionEnable(true);
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> PlaneAsset(TEXT("StaticMesh'/Engine/BasicShapes/Plane.Plane'"));
-	
+
 	if (!(PlaneMeshAsset = PlaneAsset.Succeeded() ? PlaneAsset.Object : nullptr))
 	{
 		UE_LOG(LOG_UNREAL_DR, Error, TEXT("[UnrealDR] Unable to find simple plane static mesh asset."));
@@ -145,39 +145,36 @@ void UCameraSeeThroughComponent::OnRegister()
 			// Register draw frustum for editor preview.
 			if (!this->EditorDrawFrustums.Contains(eye))
 			{
+				// Create a new view frustum.
 				auto frustum = NewObject<UDrawFrustumComponent>(this, NAME_None, RF_Transactional);
 				frustum->SetupAttachment(this);
 				frustum->SetIsVisualizationComponent(true);
 				frustum->CreationMethod = this->CreationMethod;
 				frustum->RegisterComponentWithWorld(this->GetWorld());
 
+				// Request the extrinsic pose.
 				FVector translation;
 				FRotator rotation;
 				this->GetCameraPoseFromExtrinsicTransform(transformBuffer[e], translation, rotation);
 
+				// Initialize the frustum.
 				frustum->AddLocalOffset(translation);
 				frustum->AddLocalRotation(rotation);
+				frustum->FrustumStartDist = 1.f;
+				frustum->FrustumEndDist = this->GetEyeAnchor(eye).X;	// X coordinate represents "forward".
 
-				// Create resources.
-				if (m_camera)
-				{
-					// TODO: Use intristics to compute FoV
-					frustum->FrustumColor = eye == vr::Eye_Left ? FColor::Blue : FColor::Green;
-					frustum->FrustumAngle = 90.0f;
-					frustum->FrustumAspectRatio = 16.f / 9.f;
-					frustum->FrustumStartDist = 1.f;
-					frustum->FrustumEndDist = 100.f;
-				}
-				else
-				{
-					UE_LOG(LOG_UNREAL_DR, Warning, TEXT("[UnrealDR] The OpenVR camera instance is could not be initialized."));
+				// Get the raw projection angles.
+				// Note: Unreal does somehow make it very hard to access near/far clip values. That's why they are not representative in this case.
+				float left, right, top, bottom;
+				m_system->GetProjectionRaw(eye, &left, &right, &top, &bottom);
+				left = FMath::Abs(FMath::RadiansToDegrees(FMath::Atan(left)));
+				right = FMath::Abs(FMath::RadiansToDegrees(FMath::Atan(right)));
+				top = FMath::Abs(FMath::RadiansToDegrees(FMath::Atan(top)));
+				bottom = FMath::Abs(FMath::RadiansToDegrees(FMath::Atan(bottom)));
 
-					frustum->FrustumColor = FColor::Red;
-					frustum->FrustumAngle = 90.0f;
-					frustum->FrustumAspectRatio = 16.f / 9.f;
-					frustum->FrustumStartDist = 1.f;
-					frustum->FrustumEndDist = 100.f;
-				}
+				frustum->FrustumColor = eye == vr::Eye_Left ? FColor::Blue : FColor::Green;
+				frustum->FrustumAngle = left + right;
+				frustum->FrustumAspectRatio = frustum->FrustumAngle / (top + bottom);
 
 				frustum->MarkRenderStateDirty();
 				this->EditorDrawFrustums.Add(eye) = frustum;
@@ -236,24 +233,6 @@ void UCameraSeeThroughComponent::BeginPlay()
 
 void UCameraSeeThroughComponent::EndPlay(const EEndPlayReason::Type reason)
 {
-	/*
-	// TODO: Check how to properly explicitly delete objects.
-	if (CameraImageMaterialInstance)
-		delete CameraImageMaterialInstance;
-
-	CameraImageMaterialInstance = nullptr;
-
-	if (LeftEyeImage)
-		delete LeftEyeImage;
-	
-	LeftEyeImage = nullptr;
-
-	if (RightEyeImage)
-		delete RightEyeImage;
-
-	RightEyeImage = nullptr;
-	*/
-
 	if (m_viewPlanes.Contains(vr::Eye_Left))
 		m_viewPlanes[vr::Eye_Left]->DestroyComponent();
 
@@ -269,7 +248,7 @@ void UCameraSeeThroughComponent::EndPlay(const EEndPlayReason::Type reason)
 	Super::EndPlay(reason);
 }
 
-vr::TrackedCameraHandle_t UCameraSeeThroughComponent::StartStreaming(vr::IVRTrackedCamera* camera)
+vr::TrackedCameraHandle_t UCameraSeeThroughComponent::StartStreaming(vr::IVRTrackedCamera * camera)
 {
 	if (camera == nullptr)
 		return INVALID_TRACKED_CAMERA_HANDLE;
@@ -285,7 +264,7 @@ vr::TrackedCameraHandle_t UCameraSeeThroughComponent::StartStreaming(vr::IVRTrac
 	return cameraHandle;
 }
 
-void UCameraSeeThroughComponent::StopStreaming(vr::IVRTrackedCamera* camera, vr::TrackedCameraHandle_t& trackedCamera) const
+void UCameraSeeThroughComponent::StopStreaming(vr::IVRTrackedCamera * camera, vr::TrackedCameraHandle_t & trackedCamera) const
 {
 	camera->ReleaseVideoStreamingService(trackedCamera);
 	trackedCamera = INVALID_TRACKED_CAMERA_HANDLE;
@@ -298,7 +277,7 @@ void UCameraSeeThroughComponent::UpdateImages()
 	RightEyeImage->UpdateTextureRegions(0, 1, m_frameBufferRegions[vr::Eye_Right], static_cast<uint32_t>(m_frameWidth * sizeof(uint8_t) * 4), sizeof(uint8_t) * 4, m_frameBuffer, [this](auto rawData, auto region) { this->CleanupFrameBufferRegion(rawData, region); });
 }
 
-void UCameraSeeThroughComponent::CleanupFrameBufferRegion(uint8_t* rawData, const FUpdateTextureRegion2D* region) const noexcept
+void UCameraSeeThroughComponent::CleanupFrameBufferRegion(uint8_t * rawData, const FUpdateTextureRegion2D * region) const noexcept
 {
 	// No need to clean-up.
 }
@@ -307,9 +286,9 @@ UStaticMeshComponent* UCameraSeeThroughComponent::CreateViewPlaneMesh(FName name
 {
 	UStaticMeshComponent* component = NewObject<UStaticMeshComponent>(this, name);
 
-	if (!component) 
+	if (!component)
 		return nullptr;
-	
+
 	component->SetupAttachment(this);
 	component->SetStaticMesh(this->PlaneMeshAsset);
 	component->RegisterComponent();
@@ -329,7 +308,7 @@ UStaticMeshComponent* UCameraSeeThroughComponent::CreateViewPlaneMesh(FName name
 	return component;
 }
 
-void UCameraSeeThroughComponent::TickComponent(float deltaTime, ELevelTick tickType, FActorComponentTickFunction* f)
+void UCameraSeeThroughComponent::TickComponent(float deltaTime, ELevelTick tickType, FActorComponentTickFunction * f)
 {
 	if (tickType == ELevelTick::LEVELTICK_PauseTick)
 		return;
@@ -363,7 +342,7 @@ void UCameraSeeThroughComponent::TickComponent(float deltaTime, ELevelTick tickT
 
 				// Copy frame buffer.
 				error = m_camera->GetVideoStreamFrameBuffer(m_trackedCamera, vr::VRTrackedCameraFrameType_Undistorted, m_frameBuffer, m_frameBufferSize, &frameHeader, sizeof(frameHeader));
-				
+
 				if (error != vr::VRTrackedCameraError_None)
 				{
 					UE_LOG(LOG_UNREAL_DR, Error, TEXT("[UnrealDR] Unable to copy front camera video stream frame buffer."), error);
