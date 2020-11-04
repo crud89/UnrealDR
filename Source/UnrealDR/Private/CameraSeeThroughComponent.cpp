@@ -9,7 +9,9 @@ UCameraSeeThroughComponent::UCameraSeeThroughComponent()
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> PlaneAsset(TEXT("StaticMesh'/Engine/BasicShapes/Plane.Plane'"));
 
-	if (!(PlaneMeshAsset = PlaneAsset.Succeeded() ? PlaneAsset.Object : nullptr))
+	if (PlaneAsset.Succeeded())
+		PlaneMeshAsset = PlaneAsset.Object;
+	else
 	{
 		UE_LOG(LOG_UNREAL_DR, Error, TEXT("[UnrealDR] Unable to find simple plane static mesh asset."));
 		throw;
